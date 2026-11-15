@@ -3,7 +3,8 @@
 // (Tomcat 9 with the servlets) and opens port 8080. In the terminal: ./run.sh server, ./run.sh client, ./run.sh test.
 {
   "name": "Http_Servlets (JDK 17 + Docker)",
-  "image": "mcr.microsoft.com/devcontainers/java:1-17-bookworm",
+  // mcr.microsoft.com/devcontainers/java:1-17-bookworm without its broken Yarn apt repository (see Dockerfile)
+  "build": { "dockerfile": "Dockerfile" },
   "features": {
     // docker compose inside the codespace, for the Tomcat container of ./run.sh web
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
