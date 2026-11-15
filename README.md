@@ -80,7 +80,7 @@ The hand-made `server.HttpServer` (yellow) is a few dozen lines that do, very si
 flowchart TB
     subgraph own["server.HttpServer (lesson 3)"]
         direction TB
-        o1["ServerSocket.accept()"] --> o2["readRequest(): bytes up to \r\n\r\n,<br/>then Content-Length bytes of body"]
+        o1["ServerSocket.accept()"] --> o2["readRequest(): bytes up to the empty line<br/>(CR LF CR LF), then Content-Length<br/>bytes of body"]
         o2 --> o3["always the same answer:<br/>html_example.html"]
         o3 --> o4["write status line, headers,<br/>empty line, body by hand"]
     end
