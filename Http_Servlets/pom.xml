@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Added in 2026: in 2021 this was an Eclipse Dynamic Web Project deployed to Tomcat 8.5 from the IDE
+         (WarfileStorage/archive.war was exported by hand). Maven now builds the same WAR from the sources. -->
+    <groupId>io.github.dmitryderkach</groupId>
+    <artifactId>http-servlets</artifactId>
+    <version>1.0</version>
+    <packaging>war</packaging>
+    <name>Http_Servlets - dmdev HTTP and Servlets practice</name>
+
+    <properties>
+        <maven.compiler.release>11</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <tomcat.version>9.0.123</tomcat.version>
+        <!-- default class for ./mvnw compile exec:java; override with -Dexec.mainClass=... -Dexec.args=... -->
+        <exec.mainClass>server.HttpServerRunner</exec.mainClass>
+    </properties>
+
+    <dependencies>
+        <!-- the Servlet API is provided by Tomcat at runtime, so it is not packed into the WAR.
+             Tomcat 9 implements Servlet 4.0 (javax.servlet); Tomcat 10+ renamed the package to jakarta.servlet -->
+        <dependency>
+            <groupId>javax.servlet</groupId>
+            <artifactId>javax.servlet-api</artifactId>
+            <version>4.0.1</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- tests start a real (embedded) Tomcat with this web application - no Docker needed for ./mvnw test -->
+        <dependency>
+            <groupId>org.apache.tomcat.embed</groupId>
+            <artifactId>tomcat-embed-core</artifactId>
+            <version>${tomcat.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tomcat.embed</groupId>
+            <artifactId>tomcat-embed-jasper</artifactId>
+            <version>${tomcat.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.14.4</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>http-servlets</finalName>
+        <!-- keep the original Eclipse layout: src/, src/resources/ and WebContent/ -->
+        <sourceDirectory>src</sourceDirectory>
+        <testSourceDirectory>test</testSourceDirectory>
+        <resources>
+            <!-- like the Eclipse deployment assembly: src/resources goes to the root of WEB-INF/classes,
+                 so DownloadServlet finds json_example.json with getResourceAsStream("json_example.json") -->
+            <resource>
+                <directory>src/resources</directory>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.16.0</version>
+            </plugin>
+            <plugin>
+                <!-- target/http-servlets.war and the same application unpacked in target/http-servlets/
+                     (docker-compose.yml mounts the unpacked folder into Tomcat) -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-war-plugin</artifactId>
+                <version>3.5.1</version>
+                <configuration>
+                    <warSourceDirectory>WebContent</warSourceDirectory>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.6.1</version>
+                <configuration>
+                    <!-- the same flags the official Tomcat startup scripts pass on Java 9+ (memory leak protection
+                         when an application stops); without them embedded Tomcat prints warnings in the tests -->
+                    <argLine>--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.rmi/sun.rmi.transport=ALL-UNNAMED</argLine>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.6.4</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>

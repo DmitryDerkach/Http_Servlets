@@ -8,6 +8,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 
+/* Описание (2026): клиент для своего сервера (server.HttpServerRunner должен быть запущен).
+ * Через java.net.http.HttpClient отправляет POST на http://localhost:9000 с телом из файла
+ * src/resources/json_example.json и печатает заголовки и тело ответа. Сервер при этом печатает
+ * в свою консоль полученный запрос - видно, во что HttpClient превращает билдер: в текст HTTP. */
 public class HttpClientRunner {
 	public static void main(String[] args) throws IOException, InterruptedException {
 		HttpClient httpClient = HttpClient.newBuilder()

@@ -1,0 +1,20 @@
+# 2026: Tomcat 9 with this web application - the "one button" for the servlets (./run.sh web).
+# In 2021 the project ran on Tomcat 8.5 from Eclipse; 8.5 is end-of-life, Tomcat 9 is the newest line with the
+# same javax.servlet API (Tomcat 10+ renamed it to jakarta.servlet and would not load these servlets).
+# ./run.sh web first builds the application into Http_Servlets/target/http-servlets/ and then starts this container;
+# the folder is mounted as the ROOT application, so it opens at http://localhost:8080/ (context root "/" as in Eclipse).
+name: http-servlets
+
+services:
+  tomcat:
+    image: tomcat:9.0.123-jre17
+    ports:
+      - "${TOMCAT_PORT:-8080}:8080"
+    volumes:
+      - ./Http_Servlets/target/http-servlets:/usr/local/tomcat/webapps/ROOT:ro
+    healthcheck:
+      # the static start page (served by Tomcat's DefaultServlet), so FirstServlet.init() still happens on your first request
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:8080/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

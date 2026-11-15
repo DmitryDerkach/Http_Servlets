@@ -1,0 +1,22 @@
+// 2026: GitHub Codespaces / Dev Containers - run the project in the browser without installing anything.
+// "Open in GitHub Codespaces" in README.md creates a cloud machine with JDK 17 and Docker, runs ./run.sh web
+// (Tomcat 9 with the servlets) and opens port 8080. In the terminal: ./run.sh server, ./run.sh client, ./run.sh test.
+{
+  "name": "Http_Servlets (JDK 17 + Docker)",
+  "image": "mcr.microsoft.com/devcontainers/java:1-17-bookworm",
+  "features": {
+    // docker compose inside the codespace, for the Tomcat container of ./run.sh web
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [8080, 9000],
+  "portsAttributes": {
+    "8080": { "label": "Tomcat 9 (servlets)", "onAutoForward": "openBrowser" },
+    "9000": { "label": "hand-made HttpServer (./run.sh server)", "onAutoForward": "silent" }
+  },
+  // every time the codespace starts: build the WAR, start Tomcat, call every servlet
+  "postStartCommand": "./run.sh web",
+  "customizations": {
+    "codespaces": { "openFiles": ["README.md"] },
+    "vscode": { "extensions": ["vscjava.vscode-java-pack"] }
+  }
+}

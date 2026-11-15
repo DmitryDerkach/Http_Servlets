@@ -1,8 +1,76 @@
 <!DOCTYPE html>
-<html>
- <head> 
+<html lang="en">
+ <head>
+   <!-- 2026: in 2021 this page was only "Hello World". It is now the start page of the demo:
+        links to every servlet plus two POST forms. Tomcat serves it for "/" (welcome-file-list in web.xml). -->
+   <meta charset="utf-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1">
+   <title>Http_Servlets</title>
+   <style>
+     :root { --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --muted: #94a3b8; --get: #22c55e; --post: #f59e0b; --accent: #38bdf8; }
+     * { box-sizing: border-box; }
+     body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+     main { max-width: 880px; margin: 0 auto; padding: 32px 16px 48px; }
+     h1 { font-size: 40px; margin: 0 0 4px; }
+     .lead { color: var(--muted); margin: 0 0 28px; line-height: 1.5; }
+     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+     .card { background: var(--card); border-radius: 12px; padding: 16px 18px; border: 1px solid #334155; }
+     .card h2 { font-size: 16px; margin: 0 0 8px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+     .card p { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 0 0 12px; }
+     .method { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-right: 6px; color: #0f172a; }
+     .get { background: var(--get); } .post { background: var(--post); }
+     a { color: var(--accent); }
+     input, textarea { width: 100%; background: #0b1220; color: var(--text); border: 1px solid #334155; border-radius: 8px; padding: 8px; font: inherit; margin-bottom: 8px; }
+     button { background: var(--post); color: #0f172a; border: 0; border-radius: 8px; padding: 8px 14px; font-weight: 700; cursor: pointer; }
+     footer { color: var(--muted); font-size: 13px; margin-top: 28px; }
+     code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--accent); }
+   </style>
  </head>
  <body>
+  <main>
    <h1>Hello World</h1>
+   <p class="lead">This page is a static file served by Tomcat's <code>DefaultServlet</code>.
+     Everything below is handled by the servlets of this project: Tomcat parses the HTTP request,
+     finds the servlet by URL and calls its <code>doGet</code> / <code>doPost</code>.</p>
+   <div class="grid">
+     <div class="card">
+       <h2><span class="method get">GET</span>/first</h2>
+       <p><code>FirstServlet</code>, mapped in <code>web.xml</code>. Writes a line with <code>resp.getWriter()</code>.</p>
+       <a href="first">Open /first</a>
+     </div>
+     <div class="card">
+       <h2><span class="method get">GET</span>/first?param=…</h2>
+       <p>Query parameters: <code>getParameter</code> and <code>getParameterMap</code>.</p>
+       <a href="first?param=hello&amp;city=Minsk&amp;city=Warsaw">Open with parameters</a>
+     </div>
+     <div class="card">
+       <h2><span class="method get">GET</span>/first?headers</h2>
+       <p>All request headers your browser sent: <code>getHeaderNames</code>.</p>
+       <a href="first?headers">Show my headers</a>
+     </div>
+     <div class="card">
+       <h2><span class="method get">GET</span>/download</h2>
+       <p><code>DownloadServlet</code>, mapped with <code>@WebServlet</code>. <code>Content-Disposition: attachment</code> makes the browser save the file.</p>
+       <a href="download">Download filename.json</a>
+     </div>
+     <div class="card">
+       <h2><span class="method post">POST</span>/first (form)</h2>
+       <p>A regular form: the browser sends <code>name=...</code> URL-encoded, the servlet reads it as a <b>parameter</b>.</p>
+       <form method="post" action="first">
+         <input name="name" value="Привет, сервлет!">
+         <button type="submit">Send</button>
+       </form>
+     </div>
+     <div class="card">
+       <h2><span class="method post">POST</span>/first (text body)</h2>
+       <p><code>enctype="text/plain"</code>: the text is not a parameter, the servlet reads it from the <b>body</b> with <code>req.getReader()</code>.</p>
+       <form method="post" action="first" enctype="text/plain">
+         <textarea name="text" rows="2">Привет из тела запроса</textarea>
+         <button type="submit">Send</button>
+       </form>
+     </div>
+   </div>
+   <footer>dmdev course practice, November 2021 · cleaned up in 2026 · see README.md for what happens under the hood</footer>
+  </main>
  </body>
 </html>

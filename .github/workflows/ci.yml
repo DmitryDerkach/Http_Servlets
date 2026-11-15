@@ -1,0 +1,90 @@
+name: Build, run and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    name: Java ${{ matrix.java }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [11, 17, 21]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      # the same commands as on a developer machine (README "How to run")
+      - name: JUnit tests (servlets on an embedded Tomcat, the hand-made HTTP server, the clients)
+        run: ./run.sh test
+      - name: Servlets on Tomcat 9 in Docker
+        run: ./run.sh web
+      - name: Check what Tomcat answers
+        run: |
+          set -euo pipefail
+          url=http://localhost:8080
+          curl -fsS "$url/" | grep -q "<h1>Hello World</h1>"
+          test "$(curl -fsS "$url/first")" = "Hello from First Servlet"
+          curl -fsS "$url/first?param=%3Cb%3E" | grep -qF "param = &lt;b&gt;"
+          curl -fsS -H "X-Course: dmdev" "$url/first?headers" | grep -qF "<b>x-course</b>: dmdev"
+          curl -fsS -D - -o /dev/null "$url/download" | grep -qi 'content-disposition: attachment; filename="filename.json"'
+          curl -fsS "$url/download" | cmp - Http_Servlets/src/resources/json_example.json
+          printf '%s' '{"name":"Привет"}' | curl -fsS -X POST -H "Content-Type: application/json" --data-binary @- "$url/first" | grep -qF '{"name":"Привет"}'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$url/first")" = 405
+          docker compose logs tomcat | grep -q "FirstServlet.init()"
+      - name: The hand-made HTTP server and the three Java clients
+        run: ./run.sh server
+      - name: The same with its copy in the socket package
+        run: ./run.sh server socket
+      - name: Internet examples (google.com)
+        run: ./run.sh client
+      - name: Stop Tomcat
+        if: always()
+        run: ./run.sh stop
+
+  pages:
+    name: Publish the "under the hood" page
+    needs: run
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      # the page shows real bytes: record them from this commit's code on every deploy
+      - name: Record real requests and responses (Tomcat 9 + the hand-made server)
+        run: |
+          ./run.sh web
+          (cd Http_Servlets && exec java -cp target/classes server.HttpServerRunner > target/http-server.log 2>&1) &
+          curl -s -o /dev/null --retry 30 --retry-delay 1 --retry-connrefused http://localhost:9000/
+          python3 site/capture.py
+          ./run.sh stop
+      - name: Build the site
+        run: |
+          mkdir _site
+          cp site/index.html site/captures.js _site/
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v5

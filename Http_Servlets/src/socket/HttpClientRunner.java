@@ -8,6 +8,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 
+/* Описание (2026): копия server.HttpClientRunner - POST с json_example.json на http://localhost:9000. */
 public class HttpClientRunner {
 	public static void main(String[] args) throws IOException, InterruptedException {
 		HttpClient httpClient = HttpClient.newBuilder()

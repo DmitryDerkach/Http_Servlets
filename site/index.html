@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Servlets under the hood</title>
+<meta name="description" content="Follow a real HTTP request from a TCP socket to a servlet's doGet() and back - recorded from Tomcat 9 running this repository's code.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='7' width='28' height='18' rx='3' fill='%23fff' stroke='%23D7263D' stroke-width='3' stroke-dasharray='5 3'/%3E%3Cpath d='M6 11l10 7 10-7' fill='none' stroke='%231B4DB1' stroke-width='2.5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F3F5F8;
+    --sheet: #FFFFFF;
+    --ink: #14213D;
+    --ink-soft: #4A5875;
+    --rule: #D5DCE8;
+    --red: #D7263D;
+    --blue: #1B4DB1;
+    --green: #2E8B57;
+    --amber: #E0A100;
+    --amber-wash: #FFF4D1;
+    --blue-wash: #E3EBFB;
+    --red-wash: #FCE4E7;
+    --green-wash: #DFF2E7;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+    --sans: "Bricolage Grotesque", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.55 var(--sans); }
+  a { color: var(--blue); }
+  :focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+
+  /* airmail border: the one decorative device of the page, used only around HTTP messages */
+  .airmail { position: relative; background: var(--sheet); border-radius: 6px; padding: 10px; }
+  .airmail::before { content: ""; position: absolute; inset: 0; border-radius: 6px; padding: 7px;
+    background: repeating-linear-gradient(135deg, var(--red) 0 14px, var(--sheet) 14px 22px, var(--blue) 22px 36px, var(--sheet) 36px 44px);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
+  .airmail > .inner { position: relative; padding: 14px 16px; }
+
+  /* hero */
+  header.hero { padding: 48px 0 36px; }
+  .hero-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 40px; align-items: center; }
+  h1 { font-size: clamp(34px, 5.2vw, 60px); line-height: 1.02; letter-spacing: -0.02em; font-weight: 800; margin: 0 0 18px; }
+  .hero p { font-size: 19px; color: var(--ink-soft); max-width: 34em; margin: 0 0 14px; }
+  .hero .links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+  .btn { display: inline-block; font: 600 16px var(--sans); text-decoration: none; padding: 10px 16px; border-radius: 6px;
+    border: 2px solid var(--ink); color: var(--ink); background: transparent; cursor: pointer; }
+  .btn.primary { background: var(--ink); color: var(--sheet); }
+  .stamp { position: absolute; top: -14px; right: 18px; transform: rotate(4deg); background: var(--sheet); border: 2px dashed var(--red);
+    color: var(--red); font: 600 13px var(--mono); padding: 4px 10px; border-radius: 4px; }
+
+  /* raw HTTP text */
+  .wire { font: 14px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; margin: 0; }
+  .wire .crlf { color: #9AA6BD; font-size: 11px; margin-left: 2px; user-select: none; }
+  .wire .seg { border-radius: 3px; transition: background-color .25s, box-shadow .25s; }
+  .wire .start { font-weight: 600; }
+  .wire .hname { color: var(--blue); }
+  .wire .blank { display: inline-block; min-width: 3ch; }
+  .wire .status-2 { color: var(--green); } .wire .status-4 { color: var(--red); }
+  .wire .on { background: var(--amber-wash); box-shadow: 0 0 0 3px var(--amber-wash); }
+  .wire .blank.on { background: var(--amber); box-shadow: 0 0 0 3px var(--amber); }
+
+  section { padding: 44px 0; border-top: 1px solid var(--rule); }
+  h2 { font-size: clamp(26px, 3.4vw, 38px); line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 10px; font-weight: 800; }
+  .lede { color: var(--ink-soft); max-width: 46em; margin: 0 0 26px; }
+
+  /* journey */
+  .picker { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+  .picker button { font: 600 14px var(--mono); padding: 7px 11px; border-radius: 6px; border: 1.5px solid var(--rule);
+    background: var(--sheet); color: var(--ink); cursor: pointer; }
+  .picker button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--sheet); }
+  .picker .group { width: 100%; font-size: 14px; color: var(--ink-soft); margin: 6px 0 -2px; }
+
+  .journey { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 28px; align-items: start; }
+  ol.stages { list-style: none; margin: 0; padding: 0; counter-reset: stage; position: relative; }
+  ol.stages::before { content: ""; position: absolute; left: 15px; top: 10px; bottom: 10px; width: 3px; background: var(--rule); }
+  ol.stages li { position: relative; padding: 0 0 16px 46px; counter-increment: stage; }
+  ol.stages li::before { content: counter(stage); position: absolute; left: 0; top: 0; width: 33px; height: 33px; border-radius: 50%;
+    display: grid; place-items: center; font: 600 14px var(--mono); background: var(--sheet); border: 3px solid var(--rule); color: var(--ink-soft); }
+  ol.stages li button { all: unset; cursor: pointer; display: block; border-radius: 4px; }
+  ol.stages li .who { font: 600 13px var(--mono); color: var(--ink-soft); }
+  ol.stages li .what { font-weight: 600; line-height: 1.3; }
+  ol.stages li.done::before { border-color: var(--blue); color: var(--blue); }
+  ol.stages li.current::before { background: var(--red); border-color: var(--red); color: var(--sheet); }
+  ol.stages li.current .what { color: var(--red); }
+
+  .explain { background: var(--sheet); border-left: 5px solid var(--red); border-radius: 0 6px 6px 0; padding: 14px 18px; margin-bottom: 18px; min-height: 92px; }
+  .explain h3 { margin: 0 0 4px; font-size: 19px; }
+  .explain p { margin: 0; color: var(--ink-soft); }
+  .hero code, .explain code, .lede code, td code, .life code, .msg-title code { font: 14px var(--mono); color: var(--ink); background: var(--blue-wash); padding: 1px 5px; border-radius: 3px; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+  .controls .hint { font-size: 14px; color: var(--ink-soft); }
+  .messages { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; }
+  .msg-title { font: 600 14px var(--mono); margin: 0 0 8px; color: var(--ink-soft); }
+  .msg-title b { color: var(--ink); }
+  .scroll { max-height: 420px; overflow: auto; }
+
+  /* lifecycle */
+  .life { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-bottom: 24px; }
+  .life div { padding: 16px 18px; background: var(--sheet); border-top: 6px solid var(--blue); }
+  .life div:nth-child(2) { border-top-color: var(--green); }
+  .life div:nth-child(3) { border-top-color: var(--red); }
+  .life h3 { margin: 0 0 6px; font: 600 18px var(--mono); }
+  .life p { margin: 0; color: var(--ink-soft); font-size: 16px; }
+  .log { font: 13.5px/1.6 var(--mono); background: var(--ink); color: #E6ECF7; border-radius: 6px; padding: 14px 16px; overflow: auto; margin: 0; }
+  .log .init { color: #FFC94D; }
+
+  /* spring comparison */
+  table { width: 100%; border-collapse: collapse; background: var(--sheet); border-radius: 6px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 15px; background: var(--blue-wash); }
+  td:first-child { font-weight: 600; width: 22%; }
+
+  footer { padding: 30px 0 48px; color: var(--ink-soft); font-size: 15px; border-top: 1px solid var(--rule); }
+
+  @media (max-width: 900px) {
+    .hero-grid, .journey, .messages { grid-template-columns: minmax(0, 1fr); }
+    .life { grid-template-columns: minmax(0, 1fr); }
+    ol.stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; }
+    ol.stages::before { display: none; }
+  }
+  @media (max-width: 700px) {
+    /* the comparison table: one block per row, column names as labels */
+    table, tbody, tr, td { display: block; width: 100%; }
+    thead { display: none; }
+    tr { border-bottom: 2px solid var(--rule); padding: 6px 0; }
+    td { border: 0; padding: 4px 14px; }
+    td:first-child { width: 100%; font-size: 18px; }
+    td:nth-child(2)::before { content: "This repository: "; font-weight: 600; color: var(--blue); }
+    td:nth-child(3)::before { content: "Spring Boot: "; font-weight: 600; color: var(--green); }
+    td code { word-break: break-word; }
+  }
+  @media (prefers-reduced-motion: reduce) { .wire .seg { transition: none; } }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <h1>Follow one HTTP request from a socket to your servlet</h1>
+      <p>A servlet only fills in a response object. Everything else in an HTTP exchange is text on a TCP connection, read and written by the
+        server around it: by a hand-made <code>ServerSocket</code> loop in the first lessons, and by Tomcat later.</p>
+      <p>Every request and response on this page is real: <span id="provenance">recorded from this repository's code</span>.</p>
+      <div class="links">
+        <a class="btn primary" href="#journey">Walk through a request</a>
+        <a class="btn" href="https://github.com/DmitryDerkach/Http_Servlets">Source code</a>
+        <a class="btn" href="https://codespaces.new/DmitryDerkach/Http_Servlets?quickstart=1">Run it in Codespaces</a>
+      </div>
+    </div>
+    <div class="airmail" aria-label="A real HTTP request and the first line of its response">
+      <span class="stamp">POST /first</span>
+      <div class="inner"><pre class="wire" id="hero-wire"></pre></div>
+    </div>
+  </div>
+</header>
+
+<section id="journey">
+  <div class="wrap">
+    <h2>The journey, stage by stage</h2>
+    <p class="lede">Pick a request, then step through it. The highlighted bytes are the part of the message the current stage reads or writes.
+      The two first requests go to the hand-made <code>server.HttpServer</code>, the rest to Tomcat 9 with this project's servlets.</p>
+    <div class="picker" id="picker" role="group" aria-label="Choose a recorded request"></div>
+    <div class="journey">
+      <ol class="stages" id="stages"></ol>
+      <div>
+        <div class="explain" aria-live="polite"><h3 id="stage-title"></h3><p id="stage-text"></p></div>
+        <div class="controls">
+          <button class="btn" id="prev" type="button">Previous stage</button>
+          <button class="btn primary" id="next" type="button">Next stage</button>
+          <span class="hint" id="handler"></span>
+        </div>
+        <div class="messages">
+          <div>
+            <p class="msg-title"><b>Request</b> sent by the client</p>
+            <div class="airmail"><div class="inner scroll"><pre class="wire" id="req"></pre></div></div>
+          </div>
+          <div>
+            <p class="msg-title"><b>Response</b> written back</p>
+            <div class="airmail"><div class="inner scroll"><pre class="wire" id="resp"></pre></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>One object, many requests</h2>
+    <p class="lede">Tomcat creates a servlet once and calls it for every request, from many threads at a time. That is why a servlet keeps no
+      per-request data in its fields. <code>FirstServlet</code> prints its lifecycle to the Tomcat log:</p>
+    <div class="life">
+      <div><h3>init()</h3><p>Once, on the first request to <code>/first</code> (or at startup with <code>load-on-startup</code>).</p></div>
+      <div><h3>service()</h3><p>For every request. <code>HttpServlet</code> picks <code>doGet</code>, <code>doPost</code>… by the HTTP method, or answers 405.</p></div>
+      <div><h3>destroy()</h3><p>Once, when Tomcat stops or redeploys the application.</p></div>
+    </div>
+    <p class="msg-title"><b>Tomcat log</b> while the requests above were recorded (what the servlets printed with <code>System.out</code>)</p>
+    <pre class="log" id="log"></pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>This is the core of Spring MVC</h2>
+    <p class="lede">Spring does not replace servlets, it is built on them. A Spring Boot web application is the same picture with one servlet
+      that forwards every request to your controllers.</p>
+    <table>
+      <thead><tr><th></th><th>This repository (2021)</th><th>Spring Boot web application</th></tr></thead>
+      <tbody>
+        <tr><td>Server</td><td>Tomcat 9 installed separately (here in Docker); the WAR is deployed into it</td><td>The same Tomcat, embedded in the application jar (<code>tomcat-embed-core</code>, as in this project's tests)</td></tr>
+        <tr><td>Servlets</td><td><code>FirstServlet</code>, <code>DownloadServlet</code>: one class per URL</td><td>One <code>DispatcherServlet extends HttpServlet</code> for all URLs</td></tr>
+        <tr><td>Mapping</td><td><code>web.xml</code> or <code>@WebServlet("/download")</code></td><td><code>@GetMapping("/download")</code> on a controller method</td></tr>
+        <tr><td>Reading the request</td><td><code>req.getParameter</code>, <code>req.getReader()</code>, <code>setCharacterEncoding</code></td><td><code>@RequestParam</code>, <code>@RequestBody</code>; UTF-8 set by a filter</td></tr>
+        <tr><td>Writing the response</td><td><code>resp.getWriter().write(...)</code>, headers by hand</td><td>Return an object; a message converter writes JSON/HTML</td></tr>
+        <tr><td>Lifecycle</td><td><code>init</code> / <code>service</code> / <code>destroy</code></td><td>The same calls on <code>DispatcherServlet</code>; your beans live in its application context</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p id="footer-provenance"></p>
+    <p>dmdev course practice, November 2021, cleaned up in 2026. Source, tests and the one-command run: <a href="https://github.com/DmitryDerkach/Http_Servlets">github.com/DmitryDerkach/Http_Servlets</a>.</p>
+  </div>
+</footer>
+
+<script src="captures.js"></script>
+<script>
+(() => {
+  const data = window.CAPTURES;
+  const $ = (id) => document.getElementById(id);
+
+  // ---- stages: what happens to a request, and which part of the bytes each stage touches ----
+  const OWN = [
+    { who: "ServerSocket.accept()", what: "The client opens a TCP connection", text: "<code>accept()</code> blocks until a client connects to port 9000 and returns a <code>Socket</code>: two byte streams, nothing HTTP-specific yet.", req: [], resp: [] },
+    { who: "readRequest()", what: "Read the start line and headers", text: "HTTP is plain text. The server reads bytes until an empty line (<code>\\r\\n\\r\\n</code>) - that is where the headers end.", req: ["start", "header", "blank"], resp: [] },
+    { who: "readRequest()", what: "Read exactly Content-Length bytes of body", text: "The body has no terminator, so the client says how long it is. Reading more would hang: the client waits for the answer and keeps the connection open. The 2021 code read a fixed 400 bytes and hung on short requests.", req: ["body"], resp: [] },
+    { who: "processSocket()", what: "Write the status line and headers by hand", text: "<code>HTTP/1.1 200 OK</code>, <code>content-type</code>, <code>content-length</code>, each line ending with <code>\\r\\n</code>, then an empty line.", req: [], resp: ["start", "header", "blank"] },
+    { who: "processSocket()", what: "Write the body and close the socket", text: "The file <code>html_example.html</code> goes out as bytes. Closing the socket ends the exchange; the loop goes back to <code>accept()</code>.", req: [], resp: ["body"] },
+  ];
+  const TOMCAT = [
+    { who: "Connector (Coyote NIO)", what: "Tomcat accepts the TCP connection", text: "The same <code>accept()</code> as in the hand-made server, done by Tomcat's connector on port 8080 and handed to a worker thread from a pool.", req: [], resp: [] },
+    { who: "Http11Processor", what: "Parse the bytes into a request", text: "Start line, headers up to the empty line, body by <code>Content-Length</code> - the work of <code>readRequest()</code>, done for you. The result becomes an <code>HttpServletRequest</code>.", req: ["start", "header", "blank"], resp: [] },
+    { who: "Mapper", what: "Find the servlet for the URL", text: "", req: ["start"], resp: [] },
+    { who: "HttpServlet.service()", what: "Pick the method by the HTTP verb", text: "", req: ["start"], resp: [] },
+    { who: "your servlet", what: "Your code reads the request", text: "", req: ["body"], resp: [] },
+    { who: "your servlet", what: "Your code writes the response", text: "", req: [], resp: ["body"] },
+    { who: "Http11Processor", what: "Tomcat turns the response into bytes", text: "Status line, <code>Content-Type</code> with charset, <code>Content-Length</code>, <code>Date</code> and the empty line come from Tomcat; the servlet only set a few of them.", req: [], resp: ["start", "header", "blank"] },
+  ];
+
+  // per-request explanations for the Tomcat stages 3-6
+  const NOTES = {
+    index:     ["No servlet of ours matches <code>/</code>, so Tomcat's built-in <code>DefaultServlet</code> serves the welcome file <code>index.html</code> (welcome-file-list in web.xml).", "<code>DefaultServlet</code> answers GET with the file and caching headers (<code>ETag</code>, <code>Last-Modified</code>).", "A GET has no body: everything is in the start line and headers.", "The static file is copied into the response."],
+    first:     ["<code>/first</code> is mapped in <code>WebContent/WEB-INF/web.xml</code> to <code>servlet.FirstServlet</code>. On this first request Tomcat creates it and calls <code>init()</code>.", "GET, so <code>service()</code> calls <code>doGet()</code>.", "<code>getParameter(\"param\")</code> returns null: no query string.", "<code>resp.getWriter().write(\"Hello from First Servlet\")</code>. Tomcat adds <code>Content-Length: 24</code>."],
+    params:    ["The query string is not part of the mapping: <code>/first?param=…</code> still goes to <code>FirstServlet</code>.", "GET, so <code>doGet()</code>.", "Tomcat has already split the query string: <code>getParameter(\"param\")</code> is <code>hello</code>, <code>getParameterMap()</code> holds both <code>city</code> values.", "Parameter values are HTML-escaped before they go into the page, so <code>?param=&lt;script&gt;</code> is shown, not run."],
+    headers:   ["Mapped to <code>FirstServlet</code>, like every <code>/first?…</code>.", "GET, so <code>doGet()</code>.", "<code>?headers</code> asks for <code>getHeaderNames()</code>: Tomcat has parsed every header line, names lowercased.", "Each header goes to the page and to the Tomcat log."],
+    "post-json": ["Mapped to <code>FirstServlet</code>.", "POST, so <code>service()</code> calls <code>doPost()</code>.", "<code>Content-Type</code> has no charset, so the servlet calls <code>setCharacterEncoding(\"UTF-8\")</code> before <code>getReader()</code>. Without it the Cyrillic text arrives as ISO-8859-1 garbage - the bug fixed in 2026.", "The servlet answers with what it received, as <code>text/plain</code>."],
+    "post-form": ["Mapped to <code>FirstServlet</code>.", "POST, so <code>doPost()</code>.", "For <code>application/x-www-form-urlencoded</code> Tomcat decodes the body into parameters: <code>getParameterMap()</code> has <code>name</code>, the body reader is already empty.", "The servlet answers with the parameters it received."],
+    download:  ["No entry in web.xml: Tomcat found <code>@WebServlet(\"/download\")</code> on <code>DownloadServlet</code> by scanning the classes at startup.", "GET, so <code>doGet()</code>.", "Nothing to read: the file comes from the application's classpath (<code>WEB-INF/classes/json_example.json</code>).", "<code>Content-Disposition: attachment</code> tells the browser to save the bytes as <code>filename.json</code>."],
+    put:       ["Mapped to <code>FirstServlet</code>.", "<code>FirstServlet</code> does not override <code>doPut()</code>; the inherited one answers <b>405 Method Not Allowed</b>. Our code never runs.", "Not reached.", "Not reached: Tomcat writes its own error page."],
+    missing:   ["No servlet, no file: the mapper finds nothing for <code>/missing</code>, so Tomcat answers <b>404</b> itself.", "Not reached.", "Not reached.", "Not reached: the error page is Tomcat's."],
+  };
+
+  // ---- rendering an HTTP message with visible CRLFs and named parts ----
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  const CRLF = '<span class="crlf" aria-hidden="true">␍␊</span>';
+  function render(text, isResponse) {
+    const split = text.indexOf("\r\n\r\n");
+    const head = split >= 0 ? text.slice(0, split) : text;
+    const body = split >= 0 ? text.slice(split + 4) : "";
+    const lines = head.split("\r\n");
+    let html = "";
+    const first = lines.shift();
+    let cls = "seg start";
+    if (isResponse) { const code = (first.split(" ")[1] || ""); cls += " status-" + code.charAt(0); }
+    html += `<span class="${cls}" data-part="start">${esc(first)}</span>${CRLF}\n`;
+    for (const line of lines) {
+      const i = line.indexOf(":");
+      html += `<span class="seg" data-part="header"><span class="hname">${esc(line.slice(0, i + 1))}</span>${esc(line.slice(i + 1))}</span>${CRLF}\n`;
+    }
+    html += `<span class="seg blank" data-part="blank" title="the empty line: headers end here">${CRLF}</span>\n`;
+    if (body) html += `<span class="seg" data-part="body">${esc(body).replace(/\r\n/g, CRLF + "\n")}</span>`;
+    return html;
+  }
+
+  // ---- state ----
+  let scenario = data.scenarios.find(s => s.id === "first") || data.scenarios[0];
+  let stage = 0;
+
+  function stagesFor(s) {
+    if (s.target === "own") return OWN;
+    const notes = NOTES[s.id] || [];
+    return TOMCAT.map((st, i) => (i >= 2 && i <= 5) ? { ...st, text: notes[i - 2] || "" } : st);
+  }
+
+  function highlight(el, parts) {
+    el.querySelectorAll(".seg").forEach(seg => seg.classList.toggle("on", parts.includes(seg.dataset.part)));
+    const firstOn = el.querySelector(".seg.on");
+    if (firstOn) {
+      const box = el.closest(".scroll");
+      box.scrollTop = Math.max(0, firstOn.offsetTop - box.offsetTop - 12);
+    }
+  }
+
+  function show() {
+    const list = stagesFor(scenario);
+    const st = list[stage];
+    $("stages").innerHTML = list.map((x, i) =>
+      `<li class="${i < stage ? "done" : i === stage ? "current" : ""}"><button type="button" data-stage="${i}" aria-current="${i === stage ? "step" : "false"}">` +
+      `<div class="who">${esc(x.who)}</div><div class="what">${esc(x.what)}</div></button></li>`).join("");
+    $("stage-title").textContent = `${stage + 1}. ${st.what}`;
+    $("stage-text").innerHTML = st.text;
+    $("handler").textContent = `Handled by: ${scenario.handler}`;
+    highlight($("req"), st.req);
+    highlight($("resp"), st.resp);
+    $("prev").disabled = stage === 0;
+    $("next").disabled = stage === list.length - 1;
+  }
+
+  function choose(s) {
+    scenario = s; stage = 0;
+    $("req").innerHTML = render(s.request, false);
+    $("resp").innerHTML = render(s.response, true);
+    document.querySelectorAll("#picker button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.id === s.id)));
+    show();
+  }
+
+  // picker, grouped by server
+  const label = (s) => {
+    const line = s.request.split("\r\n")[0].split(" ");
+    return `${line[0]} ${line[1]}` + (s.id === "post-form" ? " (form)" : s.id === "post-json" ? " (JSON)" : "");
+  };
+  $("picker").innerHTML =
+    `<span class="group">Hand-made server.HttpServer, port 9000</span>` +
+    data.scenarios.filter(s => s.target === "own").map(s => `<button type="button" data-id="${s.id}" title="${esc(s.title)}">${esc(label(s))}</button>`).join("") +
+    `<span class="group">Tomcat 9 with the servlets, port 8080</span>` +
+    data.scenarios.filter(s => s.target === "tomcat").map(s => `<button type="button" data-id="${s.id}" title="${esc(s.title)}">${esc(label(s))}</button>`).join("");
+  $("picker").addEventListener("click", e => {
+    const b = e.target.closest("button[data-id]");
+    if (b) choose(data.scenarios.find(s => s.id === b.dataset.id));
+  });
+  $("stages").addEventListener("click", e => {
+    const b = e.target.closest("button[data-stage]");
+    if (b) { stage = Number(b.dataset.stage); show(); }
+  });
+  $("prev").addEventListener("click", () => { if (stage > 0) { stage--; show(); } });
+  $("next").addEventListener("click", () => { if (stage < stagesFor(scenario).length - 1) { stage++; show(); } });
+
+  // hero: the POST with Cyrillic text, and the status line Tomcat answered with
+  const hero = data.scenarios.find(s => s.id === "post-json");
+  if (hero) {
+    $("hero-wire").innerHTML = render(hero.request, false) + "\n\n" +
+      `<span class="seg start status-2">${esc(hero.response.split("\r\n")[0])}</span>${CRLF}`;
+  }
+
+  // lifecycle log
+  $("log").innerHTML = (data.tomcat_log.length ? data.tomcat_log : ["(the log was not recorded)"])
+    .map(l => l.startsWith("FirstServlet.init") ? `<span class="init">${esc(l)}</span>` : esc(l)).join("\n");
+
+  const where = `recorded in ${data.where} on ${data.captured_at}` + (data.commit ? `, commit ${data.commit}` : "");
+  $("provenance").textContent = where + " with site/capture.py";
+  $("footer-provenance").textContent = `All requests and responses on this page were ${where}: Tomcat 9.0.123 and the hand-made server ran the code of this repository, and site/capture.py saved the bytes as they went over the socket.`;
+
+  choose(scenario);
+})();
+</script>
+</body>
+</html>
